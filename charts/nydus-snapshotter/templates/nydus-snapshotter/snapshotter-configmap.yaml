@@ -20,14 +20,7 @@ data:
           {{- end }}
             "timeout": 5,
             "connect_timeout": 5,
-            "retry_limit": 2,
-            "endpoint": "",
-            "scheme": "https",
-            "access_key_id": "",
-            "access_key_secret": "",
-            "bucket_name": "ganesh-nydus",
-            "region":"us-east-1",
-            "object_prefix": "nydus/"
+            "retry_limit": 2
           }
         },
         "cache": {
