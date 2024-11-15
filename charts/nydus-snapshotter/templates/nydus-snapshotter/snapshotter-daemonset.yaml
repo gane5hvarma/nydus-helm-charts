@@ -78,8 +78,23 @@ spec:
               - "/bin/sh"
               - "-c"
               - |
+                
+                # sandbox/pause image have to be fetched again, because the required image layers are not present in the containerd image store.
+                # check this for more detail: https://github.com/dragonflyoss/nydus/wiki/FAQ#q-cant-start-nydus-pod-in-k8s-error-failed-to-get[…]rom-content-store-content-digest-sha256-not-found
+                nsenter -t 1 -m ctr -n k8s.io content fetch --user AWS:$(nsenter -t 1 -m aws ecr get-login-password --region us-east-1) {{ .Values.containerRuntime.containerd.pauseImage }}
+
                 # currently, without host pid in container, we can not nsenter with pid and can not invoke systemctl correctly.
                 nsenter -t 1 -m systemctl -- restart containerd.service
+                
+          preStop:
+            exec:
+              command:
+              - "/bin/sh"
+              - "-c"
+              - |
+                # Recover the containerd config file from bak file.
+                etcContainerd={{ .Values.containerRuntime.containerd.configFile }}
+                mv -f ${etcContainerd}.bak ${etcContainerd}
         {{- end }}
         {{- if .Values.args }}
         args:
@@ -96,6 +111,12 @@ spec:
           mountPropagation: Bidirectional
         - name: fuse
           mountPath: "/dev/fuse"
+        - name: containerd-conf
+          mountPath: {{ .Values.containerRuntime.containerd.configDir }}
+        - name: containerd-data
+          mountPath: /var/lib/containerd  # Mount the containerd data directory
+          mountPropagation: Bidirectional
+        
 
         securityContext:
           privileged: true
@@ -108,11 +129,19 @@ spec:
         resources:
 {{ toYaml .Values.resources | indent 12 }}
         command:
-        - /bin/sh
-        - -cx
-        - |-
-          etcContainerd={{ .Values.containerRuntime.containerd.configFile }}
+        - "/bin/sh"
+        - "-c"
+        - |
 
+          etcContainerd={{ .Values.containerRuntime.containerd.configFile }}
+          
+          # make a bak file of containerd config file. When the helm chart is uninstalled, the bak file will be restored.
+          cp ${etcContainerd} ${etcContainerd}.bak
+          if [ $? -ne 0 ]; then
+              echo "Failed to copy ${etcContainerd} to ${etcContainerd}.bak"
+              exit 1
+          fi
+          
           toml check $etcContainerd proxy_plugins.nydus
           if [ $? -eq 0 ]; then
             echo "nydus snapshotter has already configured."
@@ -121,10 +150,14 @@ spec:
 
           toml set --overwrite $etcContainerd plugins.\"io.containerd.grpc.v1.cri\".containerd.discard_unpacked_layers false
           toml set --overwrite $etcContainerd plugins.\"io.containerd.grpc.v1.cri\".containerd.disable_snapshot_annotations false
-          toml set --overwrite $etcContainerd plugins.\"io.containerd.grpc.v1.cri\".containerd.snapshotter nydus
-
+          toml set --overwrite $etcContainerd plugins.\"io.containerd.grpc.v1.cri\".containerd.snapshotter "nydus" 
+  
           # toml command not support to set block, so just use cat command.
           cat << EOF >> $etcContainerd
+          [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc-nydus]
+            runtime_type = "io.containerd.runc.v2"
+            [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc-nydus.options]
+              snapshotter = "nydus"
           [proxy_plugins]
             [proxy_plugins.nydus]
               type = "snapshot"
@@ -133,7 +166,7 @@ spec:
 
         volumeMounts:
         - name: containerd-conf
-          mountPath: {{ .Values.containerRuntime.containerd.configFile }}
+          mountPath: {{ .Values.containerRuntime.containerd.configDir }}
       {{- end }}
 
       volumes:
@@ -154,5 +187,8 @@ spec:
       {{- if .Values.containerRuntime.containerd.enable }}
       - name: containerd-conf
         hostPath:
-          path: {{ .Values.containerRuntime.containerd.configFile }}
+          path: {{ .Values.containerRuntime.containerd.configDir }}
       {{- end }}
+      - name: containerd-data
+        hostPath:
+          path: /var/lib/containerd  

@@ -55,7 +55,7 @@ daemonsetAnnotations: {}
 
 dragonfly:
   # -- Enable dragonfly
-  enable: true
+  enable: false 
   mirrorConfig:
   - host: "http://127.0.0.1:4001"
     auth_through: false
@@ -86,3 +86,6 @@ containerRuntime:
     enable: true
     # -- Custom config path directory, default is /etc/containerd/config.toml
     configFile: "/etc/containerd/config.toml"
+    configDir: "/etc/containerd"
+
+    pauseImage: 602401143452.dkr.ecr.us-east-1.amazonaws.com/eks/pause:3.5
